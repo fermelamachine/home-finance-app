@@ -25,9 +25,7 @@ with st.sidebar:
     st.header("2) Load transactions")
     tx_files = st.file_uploader("Upload bank extracts (.xlsx or .csv) — you can select multiple", type=["xlsx", "csv"], accept_multiple_files=True)
 
-    st.header("3) Totals configuration")
-    income_categories = st.multiselect("Income categories", options=[], default=[])
-    transfer_categories = st.multiselect("Transfer categories (exclude from totals)", options=[], default=[])
+    
 
     st.divider()
     st.markdown("**Rule behavior (locked):** case-insensitive substring match; 0 or 2+ matches go to Review Queue.")
