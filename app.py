@@ -56,9 +56,11 @@ def gh_put_file(path: str, content_str: str, message: str, sha: str | None = Non
     branch = st.secrets.get("GITHUB_BRANCH", "main")
 
     if not token:
-        raise RuntimeError("Missing GITHUB_TOKEN in Streamlit secrets.")
+        st.error("Missing GITHUB_TOKEN in Streamlit secrets.")
+        st.stop()
     if not owner or not repo:
-        raise RuntimeError("Missing GITHUB_OWNER / GITHUB_REPO in Streamlit secrets.")
+        st.error("Missing GITHUB_OWNER / GITHUB_REPO in Streamlit secrets.")
+        st.stop()
 
     url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
     headers = {
@@ -79,15 +81,10 @@ def gh_put_file(path: str, content_str: str, message: str, sha: str | None = Non
     r = requests.put(url, headers=headers, json=payload, timeout=30)
 
     if not r.ok:
-        raise RuntimeError(
-            "GitHub PUT failed\n"
-            f"Status: {r.status_code}\n"
-            f"URL: {url}\n"
-            f"Response: {r.text}\n"
-        )
+        st.error(f"GitHub PUT failed: {r.status_code}\n{r.text}")
+        st.stop()
 
     return r.json()
-
 
 def gh_get_file(path: str):
     token = st.secrets.get("GITHUB_TOKEN", "")
