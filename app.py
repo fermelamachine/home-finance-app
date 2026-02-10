@@ -26,34 +26,68 @@ st.set_page_config(page_title="Home Finance (GitHub DB)", layout="wide")
 st.title("Home Finance App (GitHub DB)")
 st.caption("Rules + budgets + approvals stored in your GitHub repo. Mapping is DESCRIPTION-only (account agnostic).")
 
+
+def _s(key: str, default: str = "") -> str:
+    """Read a secret and strip whitespace/newlines (prevents ref=m\\nain issues)."""
+    try:
+        return str(st.secrets.get(key, default)).strip()
+    except Exception:
+        return default
+
+
 def secrets_ok() -> bool:
-    return all(k in st.secrets for k in ["GITHUB_TOKEN", "GITHUB_REPO"])
+    return bool(_s("GITHUB_TOKEN")) and bool(_s("GITHUB_REPO"))
+
 
 def gh_headers():
-    return {"Authorization": f"token {st.secrets['GITHUB_TOKEN']}", "Accept": "application/vnd.github+json"}
+    return {"Authorization": f"token {_s('GITHUB_TOKEN')}", "Accept": "application/vnd.github+json"}
+
 
 def gh_get_file(path: str) -> Tuple[Optional[str], Optional[str]]:
-    repo = st.secrets["GITHUB_REPO"]
-    branch = st.secrets.get("GITHUB_BRANCH", "main")
+    repo = _s("GITHUB_REPO")
+    branch = _s("GITHUB_BRANCH", "main")
     url = f"https://api.github.com/repos/{repo}/contents/{path}?ref={branch}"
+
     r = requests.get(url, headers=gh_headers(), timeout=30)
     if r.status_code == 404:
         return None, None
+
+    if r.status_code in (400, 401, 403, 422):
+        st.error(
+            f"GitHub API error {r.status_code} while reading {path}.\n\n"
+            f"Repo: {repo}\nBranch: {branch}\n\n"
+            f"Details: {r.text[:800]}"
+        )
+        st.stop()
+
     r.raise_for_status()
     data = r.json()
     text = base64.b64decode(data.get("content", "")).decode("utf-8")
     return text, data.get("sha")
 
+
 def gh_put_file(path: str, text: str, message: str, sha: Optional[str] = None):
-    repo = st.secrets["GITHUB_REPO"]
-    branch = st.secrets.get("GITHUB_BRANCH", "main")
+    repo = _s("GITHUB_REPO")
+    branch = _s("GITHUB_BRANCH", "main")
     url = f"https://api.github.com/repos/{repo}/contents/{path}"
+
     payload = {"message": message, "content": base64.b64encode(text.encode("utf-8")).decode("utf-8"), "branch": branch}
     if sha:
         payload["sha"] = sha
+
     r = requests.put(url, headers=gh_headers(), data=json.dumps(payload), timeout=30)
+
+    if r.status_code in (400, 401, 403, 422):
+        st.error(
+            f"GitHub API error {r.status_code} while writing {path}.\n\n"
+            f"Repo: {repo}\nBranch: {branch}\n\n"
+            f"Details: {r.text[:1200]}"
+        )
+        st.stop()
+
     r.raise_for_status()
     return r.json()
+
 
 RULES_PATH = "data/rules.csv"
 BUDGETS_PATH = "data/budgets.csv"
@@ -73,8 +107,6 @@ with st.sidebar:
     st.header("2) Transactions")
     tx_files = st.file_uploader("Upload bank extracts (.xlsx/.csv) — multiple allowed", type=["xlsx", "csv"], accept_multiple_files=True)
 
-    st.header("3) Totals")
-
 @st.cache_data(show_spinner=False)
 def load_repo_texts() -> Dict[str, Optional[str]]:
     rules_text, _ = gh_get_file(RULES_PATH)
@@ -84,7 +116,6 @@ def load_repo_texts() -> Dict[str, Optional[str]]:
 
 repo = load_repo_texts()
 
-# Initialize repo from Excel (only if missing)
 if init_upload is not None and (repo["rules"] is None or repo["budgets"] is None):
     xl = pd.ExcelFile(io.BytesIO(init_upload.getvalue()))
     rules_df = pd.read_excel(xl, sheet_name="RULES")
@@ -99,7 +130,7 @@ if init_upload is not None and (repo["rules"] is None or repo["budgets"] is None
     gh_put_file(RULES_PATH, rules_csv, "Initialize rules.csv", sha=rules_sha)
     gh_put_file(BUDGETS_PATH, budgets_csv, "Initialize budgets.csv", sha=budgets_sha)
 
-    ov_text, ov_sha = gh_get_file(OVERRIDES_PATH)
+    ov_text, _ = gh_get_file(OVERRIDES_PATH)
     if ov_text is None:
         gh_put_file(OVERRIDES_PATH, "KEYWORD,BUDGET CATEGORY,CATEGORY DETAIL\n", "Initialize overrides.csv", sha=None)
 
@@ -173,7 +204,6 @@ with c2:
     st.metric("Total Income", f"${summary['TOTAL INCOME']:,.2f}")
     st.metric("Total Spending", f"${summary['TOTAL SPENDING']:,.2f}")
     st.metric("Discretionary", f"${summary['DISCRETIONARY']:,.2f}")
-    st.caption("Spending excludes transfer categories & CC payments (as configured).")
 
 st.divider()
 rollups = monthly_rollups(mapped, month)
@@ -202,7 +232,7 @@ row = rq.loc[rq["RQ_ID"] == rq_id].iloc[0]
 desc = str(row["description"])
 desc_lower = desc.lower()
 
-st.code(f"{row['date'].date()} | {row['account']} | {desc}\nDT={row['debit']}  CR={row['credit']}  STATUS={row['mapping_status']}")
+st.code(f"{row['date'].date()} | {row.get('account','')} | {desc}\nDT={row['debit']}  CR={row['credit']}  STATUS={row['mapping_status']}")
 
 cand_ids = []
 mc = str(row.get("mapping_candidates","")).strip()
