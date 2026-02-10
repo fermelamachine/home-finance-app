@@ -93,9 +93,11 @@ def gh_get_file(path: str):
     branch = st.secrets.get("GITHUB_BRANCH", "main")
 
     if not token:
-        raise RuntimeError("Missing GITHUB_TOKEN in Streamlit secrets.")
+        st.error("Missing GITHUB_TOKEN in Streamlit secrets.")
+        st.stop()
     if not owner or not repo:
-        raise RuntimeError("Missing GITHUB_OWNER / GITHUB_REPO in Streamlit secrets.")
+        st.error("Missing GITHUB_OWNER / GITHUB_REPO in Streamlit secrets.")
+        st.stop()
 
     url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={branch}"
     headers = {
@@ -105,17 +107,12 @@ def gh_get_file(path: str):
 
     r = requests.get(url, headers=headers, timeout=30)
 
-    # If the file doesn't exist yet, that's okay
     if r.status_code == 404:
         return None, None
 
     if not r.ok:
-        raise RuntimeError(
-            "GitHub GET failed\n"
-            f"Status: {r.status_code}\n"
-            f"URL: {url}\n"
-            f"Response: {r.text}\n"
-        
+        st.error(f"GitHub GET failed: {r.status_code}\n{r.text}")
+        st.stop()
 
     data = r.json()
     content_b64 = data.get("content", "") or ""
@@ -123,9 +120,6 @@ def gh_get_file(path: str):
 
     decoded = base64.b64decode(content_b64).decode("utf-8") if content_b64 else ""
     return decoded, sha
-    
-    return r.json()
-
 
 RULES_PATH = "data/rules.csv"
 BUDGETS_PATH = "data/budgets.csv"
