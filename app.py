@@ -118,7 +118,7 @@ def gh_get_file(path: str):
             f"Status: {r.status_code}\n"
             f"URL: {url}\n"
             f"Response: {r.text}\n"
-        )
+        
 
     data = r.json()
     content_b64 = data.get("content", "") or ""
@@ -126,7 +126,7 @@ def gh_get_file(path: str):
 
     decoded = base64.b64decode(content_b64).decode("utf-8") if content_b64 else ""
     return decoded, sha
-    r.raise_for_status()
+    
     return r.json()
 
 
