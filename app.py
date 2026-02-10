@@ -43,48 +43,89 @@ def gh_headers():
     return {"Authorization": f"token {_s('GITHUB_TOKEN')}", "Accept": "application/vnd.github+json"}
 
 
-def gh_get_file(path: str) -> Tuple[Optional[str], Optional[str]]:
-    repo = _s("GITHUB_REPO")
-    branch = _s("GITHUB_BRANCH", "main")
-    url = f"https://api.github.com/repos/{repo}/contents/{path}?ref={branch}"
-
-    r = requests.get(url, headers=gh_headers(), timeout=30)
-    if r.status_code == 404:
-        return None, None
-
-    if r.status_code in (400, 401, 403, 422):
-        st.error(
-            f"GitHub API error {r.status_code} while reading {path}.\n\n"
-            f"Repo: {repo}\nBranch: {branch}\n\n"
-            f"Details: {r.text[:800]}"
-        )
-        st.stop()
-
-    r.raise_for_status()
-    data = r.json()
-    text = base64.b64decode(data.get("content", "")).decode("utf-8")
-    return text, data.get("sha")
 
 
-def gh_put_file(path: str, text: str, message: str, sha: Optional[str] = None):
-    repo = _s("GITHUB_REPO")
-    branch = _s("GITHUB_BRANCH", "main")
-    url = f"https://api.github.com/repos/{repo}/contents/{path}"
+import base64
+import requests
+import streamlit as st
 
-    payload = {"message": message, "content": base64.b64encode(text.encode("utf-8")).decode("utf-8"), "branch": branch}
+def gh_put_file(path: str, content_str: str, message: str, sha: str | None = None):
+    token = st.secrets.get("GITHUB_TOKEN", "")
+    owner = st.secrets.get("GITHUB_OWNER")
+    repo  = st.secrets.get("GITHUB_REPO")
+    branch = st.secrets.get("GITHUB_BRANCH", "main")
+
+    if not token:
+        raise RuntimeError("Missing GITHUB_TOKEN in Streamlit secrets.")
+    if not owner or not repo:
+        raise RuntimeError("Missing GITHUB_OWNER / GITHUB_REPO in Streamlit secrets.")
+
+    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github+json",
+    }
+
+    payload = {
+        "message": message,
+        "content": base64.b64encode(content_str.encode("utf-8")).decode("utf-8"),
+        "branch": branch,
+    }
+
+    # Only include sha when updating an existing file
     if sha:
         payload["sha"] = sha
 
-    r = requests.put(url, headers=gh_headers(), data=json.dumps(payload), timeout=30)
+    r = requests.put(url, headers=headers, json=payload, timeout=30)
 
-    if r.status_code in (400, 401, 403, 422):
-        st.error(
-            f"GitHub API error {r.status_code} while writing {path}.\n\n"
-            f"Repo: {repo}\nBranch: {branch}\n\n"
-            f"Details: {r.text[:1200]}"
+    if not r.ok:
+        raise RuntimeError(
+            "GitHub PUT failed\n"
+            f"Status: {r.status_code}\n"
+            f"URL: {url}\n"
+            f"Response: {r.text}\n"
         )
-        st.stop()
 
+    return r.json()
+
+
+def gh_get_file(path: str):
+    token = st.secrets.get("GITHUB_TOKEN", "")
+    owner = st.secrets.get("GITHUB_OWNER")
+    repo  = st.secrets.get("GITHUB_REPO")
+    branch = st.secrets.get("GITHUB_BRANCH", "main")
+
+    if not token:
+        raise RuntimeError("Missing GITHUB_TOKEN in Streamlit secrets.")
+    if not owner or not repo:
+        raise RuntimeError("Missing GITHUB_OWNER / GITHUB_REPO in Streamlit secrets.")
+
+    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={branch}"
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github+json",
+    }
+
+    r = requests.get(url, headers=headers, timeout=30)
+
+    # If the file doesn't exist yet, that's okay
+    if r.status_code == 404:
+        return None, None
+
+    if not r.ok:
+        raise RuntimeError(
+            "GitHub GET failed\n"
+            f"Status: {r.status_code}\n"
+            f"URL: {url}\n"
+            f"Response: {r.text}\n"
+        )
+
+    data = r.json()
+    content_b64 = data.get("content", "") or ""
+    sha = data.get("sha")
+
+    decoded = base64.b64decode(content_b64).decode("utf-8") if content_b64 else ""
+    return decoded, sha
     r.raise_for_status()
     return r.json()
 
@@ -108,11 +149,17 @@ with st.sidebar:
     tx_files = st.file_uploader("Upload bank extracts (.xlsx/.csv) — multiple allowed", type=["xlsx", "csv"], accept_multiple_files=True)
 
 @st.cache_data(show_spinner=False)
-def load_repo_texts() -> Dict[str, Optional[str]]:
-    rules_text, _ = gh_get_file(RULES_PATH)
-    budgets_text, _ = gh_get_file(BUDGETS_PATH)
-    overrides_text, _ = gh_get_file(OVERRIDES_PATH)
-    return {"rules": rules_text, "budgets": budgets_text, "overrides": overrides_text}
+
+def load_repo_texts():
+    try:
+        rules_text, _ = gh_get_file(RULES_PATH)
+        budgets_text, _ = gh_get_file(BUDGETS_PATH)
+        overrides_text, _ = gh_get_file(OVERRIDES_PATH)
+        return {"rules": rules_text, "budgets": budgets_text, "overrides": overrides_text}
+    except Exception as e:
+        st.error(str(e))
+        st.stop()
+
 
 repo = load_repo_texts()
 
